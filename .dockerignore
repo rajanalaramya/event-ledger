@@ -1,0 +1,14 @@
+.git/
+.github/
+.idea/
+**/.idea/
+target/
+**/target/
+data/
+**/data/
+*.iml
+*.log
+.env
+.DS_Store
+README.md
+IMPLEMENTATION_PLAN.md
