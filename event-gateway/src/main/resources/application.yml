@@ -1,0 +1,59 @@
+server:
+  port: 8080
+  shutdown: graceful
+  max-http-request-header-size: 16KB
+spring:
+  application.name: event-gateway
+  lifecycle.timeout-per-shutdown-phase: 30s
+  datasource:
+    url: jdbc:h2:file:./data/gateway-db;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;AUTO_SERVER=FALSE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate.ddl-auto: validate
+    open-in-view: false
+    properties.hibernate.jdbc.time_zone: UTC
+  flyway.enabled: true
+  h2.console.enabled: false
+  jackson.deserialization.fail-on-unknown-properties: true
+eventledger:
+  account-service:
+    base-url: http://localhost:8081
+    connect-timeout: 500ms
+    response-timeout: 2s
+  internal-retry.enabled: false
+  rate-limit:
+    enabled: true
+    capacity: 100
+    refill-tokens: 100
+    refill-period: 1s
+resilience4j:
+  circuitbreaker.instances.accountService:
+    slidingWindowSize: 10
+    minimumNumberOfCalls: 5
+    failureRateThreshold: 50
+    waitDurationInOpenState: 5s
+    permittedNumberOfCallsInHalfOpenState: 3
+  retry.instances.accountService:
+    maxAttempts: 3
+    waitDuration: 200ms
+    enableExponentialBackoff: true
+    exponentialBackoffMultiplier: 2
+    randomizedWaitFactor: 0.5
+    retryExceptionPredicate: com.example.eventledger.gateway.AccountServiceRetryPredicate
+  bulkhead.instances.accountService:
+    maxConcurrentCalls: 20
+    maxWaitDuration: 0
+management:
+  endpoints.web.exposure.include: health,prometheus,info,metrics
+  endpoint.health:
+    probes.enabled: true
+    show-details: always
+  endpoint.shutdown.enabled: false
+  health:
+    livenessstate.enabled: true
+    readinessstate.enabled: true
+  tracing.sampling.probability: 1.0
+  metrics.tags.application: ${spring.application.name}
+logging.pattern.level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"

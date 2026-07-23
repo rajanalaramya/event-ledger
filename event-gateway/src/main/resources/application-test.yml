@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:gateway;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+  jpa.hibernate.ddl-auto: validate
+eventledger:
+  rate-limit.enabled: false
+  account-service:
+    connect-timeout: 100ms
+    response-timeout: 300ms
+resilience4j:
+  circuitbreaker.instances.accountService:
+    minimumNumberOfCalls: 3
+    slidingWindowSize: 5
+    failureRateThreshold: 50
+    waitDurationInOpenState: 10s
+  retry.instances.accountService:
+    maxAttempts: 1
+    retryExceptionPredicate: com.example.eventledger.gateway.AccountServiceRetryPredicate
