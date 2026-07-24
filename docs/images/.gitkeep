@@ -1,0 +1,11 @@
+# Placeholder for optional real evidence images
+
+Add screenshots only when captured from an actual run:
+
+- CI green build
+- Jaeger trace spanning Gateway → Account
+- Prometheus metric scrape
+- Health JSON responses
+- Circuit breaker state transition
+
+Do not commit fabricated screenshots.
