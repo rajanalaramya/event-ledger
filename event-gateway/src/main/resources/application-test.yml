@@ -16,3 +16,6 @@ resilience4j:
   retry.instances.accountService:
     maxAttempts: 1
     retryExceptionPredicate: com.example.eventledger.gateway.AccountServiceRetryPredicate
+  bulkhead.instances.accountService:
+    maxConcurrentCalls: 1
+    maxWaitDuration: 0

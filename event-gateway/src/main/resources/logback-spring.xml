@@ -5,6 +5,10 @@
     <encoder class="net.logstash.logback.encoder.LogstashEncoder">
       <includeMdcKeyName>traceId</includeMdcKeyName>
       <includeMdcKeyName>spanId</includeMdcKeyName>
+      <includeMdcKeyName>operation</includeMdcKeyName>
+      <includeMdcKeyName>eventId</includeMdcKeyName>
+      <includeMdcKeyName>accountId</includeMdcKeyName>
+      <includeMdcKeyName>outcome</includeMdcKeyName>
       <customFields>{"service":"${appName}"}</customFields>
       <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSSXXX</timestampPattern>
     </encoder>

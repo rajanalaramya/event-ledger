@@ -44,13 +44,22 @@ public class AccountTransactionService {
     validate(request);
     for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        return transactionTemplate.execute(status -> applyInTransaction(request));
+        TransactionResult result = transactionTemplate.execute(status -> applyInTransaction(request));
+        String outcome = result.replay() ? "REPLAYED" : "APPLIED";
+        RequestAuditLog.info("apply_transaction", request.eventId(), request.accountId(), outcome);
+        return result;
       } catch (ObjectOptimisticLockingFailureException ex) {
         if (attempt == MAX_ATTEMPTS) throw ex;
       } catch (DataIntegrityViolationException ex) {
         if (transactions.findByEventId(request.eventId()).isPresent()) {
-          return transactionTemplate.execute(status -> applyInTransaction(request));
+          TransactionResult result = transactionTemplate.execute(status -> applyInTransaction(request));
+          String outcome = result.replay() ? "REPLAYED" : "APPLIED";
+          RequestAuditLog.info("apply_transaction", request.eventId(), request.accountId(), outcome);
+          return result;
         }
+        throw ex;
+      } catch (ConflictException ex) {
+        RequestAuditLog.info("apply_transaction", request.eventId(), request.accountId(), "CONFLICT");
         throw ex;
       }
     }

@@ -83,6 +83,7 @@ public class EventProcessingService {
       }
       if (current.getStatus() == ProcessingStatus.APPLIED) {
         replays.increment();
+        RequestAuditLog.info("submit_event", request.eventId(), request.accountId(), "REPLAYED");
         return new ProcessingResult(current, true, false);
       }
       if (current.getStatus() == ProcessingStatus.PERMANENT_FAILURE) {
@@ -93,6 +94,7 @@ public class EventProcessingService {
     EventEntity claimed = claim(request.eventId());
     if (claimed.getStatus() == ProcessingStatus.APPLIED) {
       replays.increment();
+      RequestAuditLog.info("submit_event", request.eventId(), request.accountId(), "REPLAYED");
       return new ProcessingResult(claimed, true, false);
     }
 
@@ -108,9 +110,11 @@ public class EventProcessingService {
               claimed.getFingerprint()));
       EventEntity finished = finish(claimed.getEventId(), ProcessingStatus.APPLIED, null, null);
       applied.increment();
+      RequestAuditLog.info("submit_event", request.eventId(), request.accountId(), "APPLIED");
       return new ProcessingResult(finished, false, true);
     } catch (HttpClientErrorException.Conflict e) {
       finish(claimed.getEventId(), ProcessingStatus.PERMANENT_FAILURE, "ACCOUNT_CONFLICT", e.getMessage());
+      RequestAuditLog.info("submit_event", request.eventId(), request.accountId(), "CONFLICT");
       throw new ConflictException("account service rejected the event as a conflict");
     } catch (HttpClientErrorException e) {
       finish(
@@ -118,10 +122,12 @@ public class EventProcessingService {
           ProcessingStatus.PERMANENT_FAILURE,
           "ACCOUNT_" + e.getStatusCode().value(),
           e.getMessage());
+      RequestAuditLog.info("submit_event", request.eventId(), request.accountId(), "PERMANENT_FAILURE");
       throw new DownstreamPermanentException("account service rejected the event");
     } catch (RuntimeException e) {
       downstreamFailures.increment();
       finish(claimed.getEventId(), ProcessingStatus.RETRYABLE_FAILURE, "ACCOUNT_UNAVAILABLE", e.getMessage());
+      RequestAuditLog.info("submit_event", request.eventId(), request.accountId(), "RETRYABLE_FAILURE");
       throw new DownstreamUnavailableException("account service is unavailable", e);
     }
   }

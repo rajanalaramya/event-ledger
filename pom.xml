@@ -131,4 +131,17 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>dual-service-it</id>
+            <modules>
+                <module>dual-service-it</module>
+            </modules>
+            <properties>
+                <dual.it.gateway.port>18080</dual.it.gateway.port>
+                <dual.it.account.port>18081</dual.it.account.port>
+            </properties>
+        </profile>
+    </profiles>
 </project>

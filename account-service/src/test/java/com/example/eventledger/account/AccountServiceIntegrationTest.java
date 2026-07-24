@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,12 +21,15 @@ class AccountServiceIntegrationTest {
   private final MockMvc mvc;
   private final AccountRepository accounts;
   private final AppliedTransactionRepository transactions;
+  private final MeterRegistry meters;
 
   @Autowired
-  AccountServiceIntegrationTest(MockMvc mvc, AccountRepository accounts, AppliedTransactionRepository transactions) {
+  AccountServiceIntegrationTest(MockMvc mvc, AccountRepository accounts, AppliedTransactionRepository transactions,
+      MeterRegistry meters) {
     this.mvc = mvc;
     this.accounts = accounts;
     this.transactions = transactions;
+    this.meters = meters;
   }
 
   @BeforeEach
@@ -85,6 +89,27 @@ class AccountServiceIntegrationTest {
         .andExpect(jsonPath("$.status").value("UP"))
         .andExpect(jsonPath("$.service").value("account-service"))
         .andExpect(jsonPath("$.database.status").value("UP"));
+  }
+
+  @Test
+  void rejectsNegativeAmount_returnsProblemDetail() throws Exception {
+    mvc.perform(post("/accounts/a-1/transactions").contentType(MediaType.APPLICATION_JSON)
+            .content(request("neg-1", "CREDIT", "-1.00", "fingerprint-neg")))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+    org.assertj.core.api.Assertions.assertThat(transactions.count()).isEqualTo(0);
+    org.assertj.core.api.Assertions.assertThat(accounts.count()).isEqualTo(0);
+  }
+
+  @Test
+  void customPrometheusMetrics_exposeAfterApply() throws Exception {
+    double before = meters.counter("event_ledger_transactions_applied_total").count();
+    mvc.perform(post("/accounts/a-1/transactions").contentType(MediaType.APPLICATION_JSON)
+            .content(request("metrics-1", "CREDIT", "10.00", "fingerprint-metrics")))
+        .andExpect(status().isCreated());
+
+    org.assertj.core.api.Assertions.assertThat(meters.counter("event_ledger_transactions_applied_total").count())
+        .isEqualTo(before + 1.0);
   }
 
   private String request(String eventId, String type, String amount, String fingerprint) {

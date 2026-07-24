@@ -2,6 +2,7 @@ package com.example.eventledger.gateway;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,6 +13,7 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -22,8 +24,11 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpEntity;
@@ -37,7 +42,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureObservability
 @ActiveProfiles("test")
+@ExtendWith(OutputCaptureExtension.class)
 class GatewayWireMockIntegrationTest {
   private static final WireMockServer WIREMOCK = startWireMock();
 
@@ -174,13 +181,50 @@ class GatewayWireMockIntegrationTest {
   @Test
   void tracePropagation_sendsTraceparent() {
     stubSuccessfulApply();
-    String traceparent = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
+    String traceId = "0123456789abcdef0123456789abcdef";
+    String traceparent = "00-" + traceId + "-0123456789abcdef-01";
 
     ResponseEntity<JsonNode> created = post(event("trace-1", "acct-trace", "10.00", "2025-01-01T12:00:00Z"), traceparent);
 
     assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     WIREMOCK.verify(postRequestedFor(urlPathMatching("/accounts/.*/transactions"))
-        .withHeader("traceparent", matching("00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]")));
+        .withHeader("traceparent", matching("00-" + traceId + "-[0-9a-f]{16}-0[01]")));
+  }
+
+  @Test
+  void tracePropagation_gatewayAuditLogContainsSameTraceId(org.springframework.boot.test.system.CapturedOutput output) {
+    stubSuccessfulApply();
+    String traceId = "abcdef0123456789abcdef0123456789";
+    String traceparent = "00-" + traceId + "-0123456789abcdef-01";
+
+    ResponseEntity<JsonNode> created =
+        post(event("trace-log-1", "acct-trace-log", "10.00", "2025-01-01T12:00:00Z"), traceparent);
+
+    assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    WIREMOCK.verify(postRequestedFor(urlPathMatching("/accounts/.*/transactions"))
+        .withHeader("traceparent", matching("00-" + traceId + "-[0-9a-f]{16}-0[01]")));
+
+    JsonNode audit = findGatewayAudit(output.getAll(), "trace-log-1");
+    assertThat(audit.path("traceId").asText()).isEqualTo(traceId);
+    assertThat(audit.path("spanId").asText()).isNotBlank().isNotEqualTo("0123456789abcdef");
+    assertThat(audit.path("service").asText()).isEqualTo("event-gateway");
+    assertThat(audit.path("operation").asText()).isEqualTo("submit_event");
+    assertThat(audit.path("outcome").asText()).isEqualTo("APPLIED");
+  }
+
+  private JsonNode findGatewayAudit(String logs, String eventId) {
+    try {
+      for (String line : logs.split("\\R")) {
+        String trimmed = line.trim();
+        if (!trimmed.startsWith("{") || !trimmed.contains(eventId) || !trimmed.contains("submit_event")) {
+          continue;
+        }
+        return mapper.readTree(trimmed);
+      }
+    } catch (Exception e) {
+      throw new AssertionError("failed parsing gateway audit logs", e);
+    }
+    throw new AssertionError("no structured gateway audit log found for eventId=" + eventId + "\n" + logs);
   }
 
   @Test
@@ -214,6 +258,69 @@ class GatewayWireMockIntegrationTest {
     assertThat(fastFailure.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
     assertThat(circuitBreakers.circuitBreaker("accountService").getState().name()).isEqualTo("OPEN");
     WIREMOCK.verify(3, postRequestedFor(urlPathMatching("/accounts/.*/transactions")));
+  }
+
+  @Test
+  void healthEndpoint_reportsServiceAndDatabase() {
+    ResponseEntity<JsonNode> health = get("/health");
+
+    assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(health.getBody().path("status").asText()).isEqualTo("UP");
+    assertThat(health.getBody().path("service").asText()).isEqualTo("event-gateway");
+    assertThat(health.getBody().path("database").path("status").asText()).isEqualTo("UP");
+  }
+
+  @Test
+  void customPrometheusMetrics_exposeAfterApply() {
+    stubSuccessfulApply();
+    assertThat(post(event("metrics-1", "acct-metrics", "10.00", "2025-01-01T12:00:00Z")).getStatusCode())
+        .isEqualTo(HttpStatus.CREATED);
+
+    ResponseEntity<String> prometheus = http.getForEntity(url("/actuator/prometheus"), String.class);
+
+    assertThat(prometheus.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(prometheus.getBody()).contains("event_ledger_events_received_total");
+    assertThat(prometheus.getBody()).contains("event_ledger_events_applied_total");
+  }
+
+  @Test
+  void rejectsNegativeAmount_returnsProblemDetail() {
+    ResponseEntity<JsonNode> invalid =
+        post(event("neg-1", "acct-validation", "-1.00", "2025-01-01T12:00:00Z"));
+
+    assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(invalid.getBody().path("errorCode").asText()).isEqualTo("VALIDATION_ERROR");
+    assertThat(events.count()).isZero();
+  }
+
+  @Test
+  void bulkhead_rejectsWhenSaturated() throws Exception {
+    WIREMOCK.stubFor(
+        WireMock.post(urlPathMatching("/accounts/.*/transactions"))
+            .willReturn(successResponse(false).withFixedDelay(2_000)));
+
+    try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+      Future<ResponseEntity<JsonNode>> inFlight =
+          executor.submit(() -> post(event("bulkhead-1", "acct-bulkhead", "10.00", "2025-01-01T12:00:00Z")));
+
+      await()
+          .atMost(Duration.ofSeconds(5))
+          .untilAsserted(
+              () ->
+                  WIREMOCK.verify(
+                      moreThanOrExactly(1), postRequestedFor(urlPathMatching("/accounts/.*/transactions"))));
+
+      ResponseEntity<JsonNode> rejected =
+          post(event("bulkhead-2", "acct-bulkhead", "10.00", "2025-01-01T12:01:00Z"));
+
+      assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+      assertThat(rejected.getBody().path("errorCode").asText()).isEqualTo("DOWNSTREAM_UNAVAILABLE");
+      assertThat(inFlight.get().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    assertThat(events.findByEventId("bulkhead-2")).isPresent();
+    assertThat(events.findByEventId("bulkhead-2").orElseThrow().getStatus().name())
+        .isEqualTo("RETRYABLE_FAILURE");
   }
 
   @Nested

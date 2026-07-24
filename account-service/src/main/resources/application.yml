@@ -34,7 +34,9 @@ management:
   health:
     livenessstate.enabled: true
     readinessstate.enabled: true
-  tracing.sampling.probability: 1.0
+  tracing:
+    sampling.probability: 1.0
+    propagation.type: w3c
   metrics.tags.application: ${spring.application.name}
 logging.pattern.level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
 info.app:
