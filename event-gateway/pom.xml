@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -22,7 +22,7 @@
             <groupId>io.opentelemetry</groupId><artifactId>opentelemetry-exporter-otlp</artifactId>
             <exclusions><exclusion><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-api-incubator</artifactId></exclusion></exclusions>
         </dependency>
-        <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-api-incubator</artifactId><version>1.38.0-alpha</version><scope>runtime</scope></dependency>
+        <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-api-incubator</artifactId><version>1.64.0-alpha</version><scope>runtime</scope></dependency>
         <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
         <dependency><groupId>com.h2database</groupId><artifactId>h2</artifactId><scope>runtime</scope></dependency>
         <dependency><groupId>com.example.eventledger</groupId><artifactId>contract</artifactId></dependency>
