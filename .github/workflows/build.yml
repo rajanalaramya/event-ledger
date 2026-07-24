@@ -2,24 +2,141 @@ name: Build
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Build and test
+
+      - name: Validate Spotless formatting
+        run: mvn --batch-mode -q spotless:check
+        continue-on-error: true
+
+      - name: Maven verify
         run: mvn --batch-mode clean verify
-      # Dependency tree aids review; use a dedicated vulnerability scanner in deployment pipelines.
-      - name: Inspect dependency graph
-        run: mvn --batch-mode dependency:tree
+
+      - name: Upload Surefire reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build service images
+        run: |
+          docker build -f account-service/Dockerfile -t event-ledger-account-service:ci .
+          docker build -f event-gateway/Dockerfile -t event-ledger-event-gateway:ci .
+
+      - name: Validate Compose file
+        run: docker compose config --quiet
+
+      - name: Start core services
+        run: docker compose up --build -d
+
+      - name: Wait for health endpoints
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health >/dev/null \
+              && curl -fsS http://localhost:8081/health >/dev/null; then
+              echo "Services healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for health checks"
+          docker compose ps
+          docker compose logs --tail=200
+          exit 1
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          EVENT_ID="evt-ci-$(date +%s)"
+          curl -fsS -X POST http://localhost:8080/events \
+            -H "Content-Type: application/json" \
+            -d "{\"eventId\":\"${EVENT_ID}\",\"accountId\":\"acct-ci\",\"type\":\"CREDIT\",\"amount\":10.00,\"currency\":\"USD\",\"eventTimestamp\":\"2026-05-15T14:02:11Z\"}" \
+            | tee /tmp/create.json
+          curl -fsS -X POST http://localhost:8080/events \
+            -H "Content-Type: application/json" \
+            -d "{\"eventId\":\"${EVENT_ID}\",\"accountId\":\"acct-ci\",\"type\":\"CREDIT\",\"amount\":10.00,\"currency\":\"USD\",\"eventTimestamp\":\"2026-05-15T14:02:11Z\"}" \
+            | tee /tmp/replay.json
+          curl -fsS "http://localhost:8080/events?account=acct-ci" >/tmp/events.json
+          curl -fsS http://localhost:8081/accounts/acct-ci/balance | tee /tmp/balance.json
+          curl -fsS http://localhost:8080/actuator/prometheus | grep -q event_ledger_events_received_total
+          python3 - <<'PY'
+          import json
+          create = json.load(open("/tmp/create.json"))
+          replay = json.load(open("/tmp/replay.json"))
+          balance = json.load(open("/tmp/balance.json"))
+          assert create.get("processingStatus") == "APPLIED"
+          assert replay.get("idempotentReplay") is True
+          assert float(balance["balance"]) == 10.0
+          print("Smoke checks passed")
+          PY
+
+      - name: Shut down Compose
+        if: always()
+        run: docker compose down -v
+
+  dual-service-it:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Maven dual-service integration verify
+        run: mvn --batch-mode clean verify -Pdual-service-it
+
+      - name: Upload Failsafe reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dual-service-failsafe-reports
+          path: |
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
+
+      - name: Upload dual-service process logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dual-service-it-logs
+          path: |
+            target/dual-service-it/logs/**
+            dual-service-it/target/dual-service-it/logs/**
+          if-no-files-found: ignore

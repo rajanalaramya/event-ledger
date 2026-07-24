@@ -1,0 +1,46 @@
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      spring-boot:
+        patterns:
+          - "org.springframework*"
+          - "org.springframework.boot*"
+      testing:
+        patterns:
+          - "org.junit*"
+          - "org.assertj*"
+          - "org.awaitility*"
+          - "org.wiremock*"
+          - "org.testcontainers*"
+      observability:
+        patterns:
+          - "io.micrometer*"
+          - "io.opentelemetry*"
+          - "io.github.resilience4j*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: "/account-service"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: docker
+    directory: "/event-gateway"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
