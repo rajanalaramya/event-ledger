@@ -10,7 +10,7 @@ COPY account-service/src account-service/src
 
 RUN mvn -pl account-service -am package -DskipTests
 
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
